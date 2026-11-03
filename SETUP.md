@@ -9,8 +9,10 @@ This guide takes you from the zip file to a live app on your phone. Follow it to
 | GitHub | Holds your code | Free |
 | Supabase | Your database and login | Free |
 | TCG API | TCGplayer market prices for TCG cards and sealed | Free tier, paid plans if you need more |
-| SportsCardsPro | Raw and graded sports card prices | Paid subscription |
+| eBay Developer | Prices for sports sealed boxes from eBay Buy It Now listings | Free |
 | Vercel | Hosts the website and runs the nightly price job | Free |
+
+SportsCardsPro (sports singles and slabs) and PriceCharting (graded TCG) are optional paid add-ons. You can skip them.
 
 You'll collect several keys along the way. Keep a note open (Notes app, a text file) and paste each one in as you get it. **Never post these keys anywhere public or put them in GitHub.**
 
@@ -50,6 +52,8 @@ You can create a **new Supabase project** (recommended, keeps this separate from
 5. Click **Run**. You should see "Success. No rows returned."
 6. Check it worked: click **Table Editor** in the left sidebar. You should see `cv_holdings`, `cv_price_history`, and `cv_sales`.
 
+> **Already ran an older copy of `schema.sql`?** Run this new one again the same way. It's safe to run twice and won't delete anything. It adds eBay as an allowed price source.
+
 ### 2c. Copy your keys
 1. Click the **gear icon (Project Settings)** at the bottom of the left sidebar.
 2. Find your **Project URL** (it looks like `https://abcdxyz.supabase.co`). Under **Data API** or on the main settings page. Copy it into your note as `SUPABASE URL`.
@@ -79,16 +83,29 @@ You'll come back in Step 6 to turn off new sign-ups so strangers can't make acco
    - The nightly update = 1 request per different TCG product you own
    - So the free tier covers you until you own around 80 different TCG products. Past that, upgrade to a paid plan (from about $9.99/month, check their pricing page for current prices).
 
-### 3b. SportsCardsPro (sports card prices)
-1. Go to **sportscardspro.com** and create an account.
-2. Subscribe to a plan that includes API access. Check their **Subscriptions** page for current plans and prices.
-3. Go to your **Subscription** page and click the **API/Download** button. Copy the 40-character token into your note as `SPORTSCARDSPRO TOKEN`.
+### 3b. eBay Developer keys (sports sealed prices, free)
+The app searches eBay for new, Buy It Now listings of each box you own. It drops junk (cases, breaks, opened or empty boxes, wrong years, suspiciously cheap listings), then uses the middle of the 5 cheapest that remain as the market price.
 
-### 3c. PriceCharting (optional)
+1. Go to **developer.ebay.com** and click **Register**. You can sign in with your normal eBay account.
+2. Fill out the sign-up form. eBay may take up to one business day to approve your developer account. You'll get an email.
+3. Once approved, sign in and go to **Application Keys** (under your account name, or **My Account → Application Access Keys**).
+4. Give your app a name like `card-vault`, then click **Create a keyset** under **Production** (not Sandbox).
+5. eBay may ask about **Marketplace Account Deletion** notifications before turning on your Production keys. This app doesn't store any eBay user data, so choose the option to **apply for an exemption** (it says something like "I do not persist eBay data"), pick that reason, and submit.
+6. Your Production keyset shows several values. You need two:
+   - **App ID (Client ID)**: copy it as `EBAY CLIENT ID`.
+   - **Cert ID (Client Secret)**: copy it as `EBAY CLIENT SECRET`. Keep this one private.
+   - You can ignore the Dev ID.
+
+### 3c. SportsCardsPro (optional, paid)
+Only if you later want sports **singles or slabs** priced automatically. Skip it for now.
+1. Subscribe at **sportscardspro.com** to a plan with API access.
+2. On your **Subscription** page, click **API/Download** and copy the 40-character token as `SPORTSCARDSPRO TOKEN`.
+
+### 3d. PriceCharting (optional)
 Only do this if you want **graded Pokémon and other TCG slabs** (like a PSA 10 Charizard) priced automatically. TCGplayer only prices raw cards. Without this, you can still add graded TCG cards and enter their value yourself.
 1. Go to **pricecharting.com**, subscribe to a plan with API access, and copy the token from your subscription page as `PRICECHARTING TOKEN`.
 
-### 3d. Make a cron secret
+### 3e. Make a cron secret
 This is a password that protects the nightly price job so random people can't trigger it.
 1. Go to any password generator (your phone's password manager can make one, or search "random password generator").
 2. Make one at least 32 characters long with **letters and numbers only** (no symbols).
@@ -111,9 +128,13 @@ This is a password that protects the nightly price job so random people can't tr
 | `SUPABASE_URL` | your SUPABASE URL (same as above) |
 | `SUPABASE_SERVICE_ROLE_KEY` | your SERVICE KEY (secret) |
 | `TCGAPI_KEY` | your TCGAPI KEY |
-| `SPORTSCARDSPRO_TOKEN` | your SPORTSCARDSPRO TOKEN |
-| `PRICECHARTING_TOKEN` | only if you did Step 3c |
+| `EBAY_CLIENT_ID` | your EBAY CLIENT ID |
+| `EBAY_CLIENT_SECRET` | your EBAY CLIENT SECRET |
 | `CRON_SECRET` | your CRON SECRET |
+| `SPORTSCARDSPRO_TOKEN` | optional: only if you did Step 3c |
+| `PRICECHARTING_TOKEN` | optional: only if you did Step 3d |
+
+   Skip the optional ones if you didn't sign up for them. Don't add them with an empty value.
 
    Double-check for extra spaces at the start or end of each value.
 
@@ -149,12 +170,22 @@ You can still sign in normally.
 
 ## Step 7 — Add your first items and test
 
-1. In the app, tap **+ Add**.
-2. Pick **Sports** or **TCG**, then **Single**, **Graded**, or **Sealed**.
-3. Choose the price source (it picks a sensible default), type a search like `Caleb Williams 2024 Prizm` or `Surging Sparks booster box`, and tap **Search**.
-4. Tap the right result. You'll see its prices. Pick the one that matches what you own (e.g. **PSA 10**, or **Holofoil**).
-5. Fill in quantity and what you paid per item. Tap **Add to vault**.
-6. Open the item and tap **Refresh price** to make sure live pricing works.
+**A sports sealed box:**
+1. In the app, tap **+ Add**. **Sports** and **Sealed** are already selected, with **eBay Buy It Now** as the price source.
+2. Type the box the way you'd search eBay, like `2024 Panini Prizm Football Hobby Box`. Include the year, brand, sport, and box type (Hobby, Blaster, Mega, FOTL, Jumbo…).
+3. Tap **Check eBay**. You'll see the estimated price and the 5 listings it used.
+4. **Look at those listings.** If any are the wrong product (say, a Blaster when you own a Hobby box), add words to leave out, like `blaster, mega`, and tap **Check eBay** again.
+5. Fill in quantity and what you paid per box. Tap **Add to vault**.
+
+**A TCG card or box:**
+1. Tap **+ Add**, then **TCG**, then **Single** or **Sealed**.
+2. Search something like `Charizard ex Obsidian Flames` or `Surging Sparks booster box`, and tap **Search**.
+3. Tap the right result. Pick the printing you own (e.g. **Normal** or **Holofoil**).
+4. Fill in quantity and cost. Tap **Add to vault**.
+
+Then open any item and tap **Refresh price** to make sure live pricing works.
+
+Sports singles and slabs still work. They just use **Enter price myself**, unless you add SportsCardsPro later.
 
 **Add it to your phone's home screen:** open the app in Safari → tap **Share** → **Add to Home Screen**. (On Android Chrome: **⋮** menu → **Add to Home screen**.)
 
@@ -194,10 +225,12 @@ Each night adds a point to your charts. The portfolio chart gets useful after ab
 | Problem | Fix |
 |---|---|
 | "Couldn't load your data… relation does not exist" | You haven't run `schema.sql` yet. Do Step 2b. |
-| Search says "TCGAPI_KEY is not set in Vercel" (or the token name) | Add that variable in Vercel, then redeploy. |
+| Search says "TCGAPI_KEY is not set in Vercel" (or another key name) | Add that variable in Vercel, then redeploy. |
 | Search says "Session expired" or "Not signed in" | Sign out and sign back in. If it keeps happening, check `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in Vercel. |
 | "Price source daily limit reached" | You used up the TCG API free tier for today. It resets daily, or upgrade your plan. |
 | An item says "Price check failed: No current market price…" | That grade or printing has no recent sales. Open the item → **Edit** → check "Stop automatic pricing" and enter a value yourself. |
-| A sealed sports box doesn't show up in search | SportsCardsPro may not list it. Add it with **Enter price myself**. |
+| "eBay sign-in failed" | Check `EBAY_CLIENT_ID` and `EBAY_CLIENT_SECRET` in Vercel. Make sure they're the **Production** keys, not Sandbox, and that your Production keyset is turned on (Step 3b, part 5). Redeploy after fixing. |
+| A sports box's eBay price looks too high or too low | Open it → **See listings** to check what's matching. Then **Edit** the eBay search or add words to leave out, save, and tap **Refresh price**. |
+| "No current market price for eBay low Buy It Now" | No new Buy It Now listings matched tonight. Usually it's an older or rare box. Broaden the search, or switch it to a manual price. |
 | The nightly job never runs | Make sure `CRON_SECRET` is set in Vercel and that you redeployed after adding it. Check **Settings → Cron Jobs**. |
 | Changed code or settings but nothing changed | Redeploy (Step 4 note). For code changes, upload the changed files to GitHub. Vercel redeploys on its own after each commit. |

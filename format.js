@@ -29,6 +29,7 @@ export const KIND_LABELS = { single: 'Single', graded: 'Graded', sealed: 'Sealed
 export const CATEGORY_LABELS = { sports: 'Sports', tcg: 'TCG' };
 export const SOURCE_LABELS = {
   tcgapi: 'TCGplayer Market',
+  ebay: 'eBay Buy It Now',
   sportscardspro: 'SportsCardsPro',
   pricecharting: 'PriceCharting',
   manual: 'Manual',
@@ -45,6 +46,20 @@ export function itemMath(h) {
   const pl = priced ? value - cost : 0;
   const plPct = priced && cost > 0 ? (pl / cost) * 100 : null;
   return { qty, cost, value, pl, plPct, priced };
+}
+
+export function parseEbayId(id) {
+  try {
+    const o = JSON.parse(id);
+    return { q: String(o.q || ''), x: String(o.x || '') };
+  } catch {
+    return { q: String(id || ''), x: '' };
+  }
+}
+
+export function ebaySearchUrl(q) {
+  const p = new URLSearchParams({ _nkw: q, LH_BIN: '1', LH_ItemCondition: '1000', _sop: '15' });
+  return `https://www.ebay.com/sch/i.html?${p}`;
 }
 
 export function saleNet(s) {

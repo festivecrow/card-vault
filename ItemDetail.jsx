@@ -6,7 +6,8 @@ import Thumb from './Thumb';
 import { supabase } from '../supabase';
 import { apiCall } from '../lib/api';
 import {
-  CATEGORY_LABELS, KIND_LABELS, SOURCE_LABELS, dateLabel, itemMath, money, num, pct, plClass, signedMoney, timeAgo, today,
+  CATEGORY_LABELS, KIND_LABELS, SOURCE_LABELS, dateLabel, ebaySearchUrl, itemMath, money, num, parseEbayId, pct, plClass,
+  signedMoney, timeAgo, today,
 } from '../lib/format';
 
 export default function ItemDetail({ item, onClose, onChanged }) {
@@ -89,6 +90,14 @@ export default function ItemDetail({ item, onClose, onChanged }) {
             <PriceChart points={history} height={200} />
           </div>
 
+          {item.price_source === 'ebay' && item.source_id && (
+            <div className="muted small">
+              Tracking eBay search “{parseEbayId(item.source_id).q}”
+              {parseEbayId(item.source_id).x && <> (leaving out: {parseEbayId(item.source_id).x})</>} ·{' '}
+              <a href={ebaySearchUrl(parseEbayId(item.source_id).q)} target="_blank" rel="noreferrer">See listings</a>
+            </div>
+          )}
+
           <div className="muted small detail-meta">
             {item.purchase_date && <span>Bought {dateLabel(item.purchase_date)}</span>}
             {item.purchased_from && <span>from {item.purchased_from}</span>}
@@ -122,6 +131,9 @@ function EditForm({ item, onCancel, onSaved }) {
     image_url: item.image_url || '',
     notes: item.notes || '',
   });
+  const ebay = item.price_source === 'ebay' ? parseEbayId(item.source_id) : null;
+  const [ebayQ, setEbayQ] = useState(ebay?.q || '');
+  const [ebayX, setEbayX] = useState(ebay?.x || '');
   const [stopAuto, setStopAuto] = useState(false);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -148,6 +160,13 @@ function EditForm({ item, onCancel, onSaved }) {
     };
     const newPrice = num(f.current_price);
     const priceChanged = manual && newPrice !== (item.current_price != null ? Number(item.current_price) : null);
+    if (ebay && !stopAuto) {
+      if (ebayQ.trim().length < 3) {
+        setBusy(false);
+        return setErr('eBay search needs at least 3 characters');
+      }
+      patch.source_id = JSON.stringify({ q: ebayQ.trim(), x: ebayX.trim() });
+    }
     if (stopAuto) Object.assign(patch, { price_source: 'manual', source_id: null, price_field: null, price_error: null });
     if (priceChanged) Object.assign(patch, { current_price: newPrice, price_updated_at: new Date().toISOString() });
     const { error } = await supabase.from('cv_holdings').update(patch).eq('id', item.id);
@@ -173,9 +192,16 @@ function EditForm({ item, onCancel, onSaved }) {
         {manual && <label>Current value per item ($)<input type="number" min="0" step="0.01" value={f.current_price} onChange={set('current_price')} /></label>}
         <label>Purchase date<input type="date" value={f.purchase_date} onChange={set('purchase_date')} /></label>
         <label>Bought from<input value={f.purchased_from} onChange={set('purchased_from')} /></label>
+        {ebay && !stopAuto && (
+          <>
+            <label className="span2">eBay search<input value={ebayQ} onChange={(e) => setEbayQ(e.target.value)} /></label>
+            <label className="span2">Leave out listings with (comma separated)<input value={ebayX} onChange={(e) => setEbayX(e.target.value)} /></label>
+          </>
+        )}
         <label className="span2">Image URL<input value={f.image_url} onChange={set('image_url')} /></label>
         <label className="span2">Notes<textarea rows="2" value={f.notes} onChange={set('notes')} /></label>
       </div>
+      {ebay && !stopAuto && <p className="muted tiny">After saving, tap “Refresh price” to check eBay with the new search.</p>}
       {item.price_source !== 'manual' && (
         <label className="check">
           <input type="checkbox" checked={stopAuto} onChange={(e) => setStopAuto(e.target.checked)} />

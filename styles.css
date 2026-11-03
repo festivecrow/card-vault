@@ -202,3 +202,10 @@ label.check input { width: auto; }
   .action-group { justify-content: stretch; }
   .action-group .btn { flex: 1; }
 }
+
+/* eBay listing preview */
+.listing-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.listing-list li { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: 0.85rem; }
+.listing-list a { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.listing-list a:hover { color: var(--gold); }
+a { color: var(--gold); }

@@ -17,9 +17,118 @@ export const GRADE_FIELDS = [
 export function enabledSources() {
   return {
     tcgapi: Boolean(process.env.TCGAPI_KEY),
+    ebay: Boolean(process.env.EBAY_CLIENT_ID && process.env.EBAY_CLIENT_SECRET),
     sportscardspro: Boolean(process.env.SPORTSCARDSPRO_TOKEN),
     pricecharting: Boolean(process.env.PRICECHARTING_TOKEN),
   };
+}
+
+// ---------- eBay (free Browse API: active Buy It Now listings) ----------
+// Used for sports sealed wax. Sealed boxes are identical products, so the
+// cheapest legit Buy It Now listings are a good read on market price.
+const EBAY_TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
+const EBAY_SEARCH_URL = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
+const EBAY_DEFAULT_EXCLUDE = [
+  'case', 'break', 'spot', 'pick your', 'you pick', 'pyt', 'random', 'repack', 'empty',
+  'opened', 'resealed', 'lot of', 'digital', 'read description', 'no packs', 'wrapper',
+];
+let ebayToken = null;
+
+async function ebayAuth() {
+  if (ebayToken && ebayToken.exp > Date.now() + 60_000) return ebayToken.value;
+  const id = process.env.EBAY_CLIENT_ID;
+  const secret = process.env.EBAY_CLIENT_SECRET;
+  if (!id || !secret) throw new Error('EBAY_CLIENT_ID / EBAY_CLIENT_SECRET are not set in Vercel');
+  const r = await fetch(EBAY_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`,
+    },
+    body: `grant_type=client_credentials&scope=${encodeURIComponent('https://api.ebay.com/oauth/api_scope')}`,
+    signal: AbortSignal.timeout(15000),
+  });
+  const b = await r.json().catch(() => null);
+  if (!r.ok || !b?.access_token) {
+    throw new Error(b?.error_description || `eBay sign-in failed (HTTP ${r.status}). Check your eBay keys.`);
+  }
+  ebayToken = { value: b.access_token, exp: Date.now() + (b.expires_in || 7200) * 1000 };
+  return ebayToken.value;
+}
+
+export function parseEbayId(id) {
+  try {
+    const o = JSON.parse(id);
+    return { q: String(o.q || ''), x: String(o.x || '') };
+  } catch {
+    return { q: String(id || ''), x: '' };
+  }
+}
+
+export function ebaySearchUrl(q) {
+  const p = new URLSearchParams({ _nkw: q, LH_BIN: '1', LH_ItemCondition: '1000', _sop: '15' });
+  return `https://www.ebay.com/sch/i.html?${p}`;
+}
+
+const median = (arr) => {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+const round2 = (n) => Math.round(n * 100) / 100;
+
+export async function ebayLookup(q, extraExclude = '') {
+  if (!q || q.trim().length < 3) throw new Error('Type at least 3 characters');
+  const token = await ebayAuth();
+  const params = new URLSearchParams({
+    q: q.trim(),
+    limit: '100',
+    filter: 'buyingOptions:{FIXED_PRICE},conditionIds:{1000},itemLocationCountry:US,deliveryCountry:US,priceCurrency:USD',
+  });
+  const r = await fetch(`${EBAY_SEARCH_URL}?${params}`, {
+    headers: { Authorization: `Bearer ${token}`, 'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US' },
+    signal: AbortSignal.timeout(15000),
+  });
+  const body = await r.json().catch(() => null);
+  if (!r.ok) {
+    const msg = body?.errors?.[0]?.longMessage || body?.errors?.[0]?.message || `eBay search failed (HTTP ${r.status})`;
+    throw new Error(msg);
+  }
+
+  const exclude = [
+    ...EBAY_DEFAULT_EXCLUDE,
+    ...extraExclude.split(',').map((w) => w.trim().toLowerCase()).filter(Boolean),
+  ];
+  const years = q.match(/\b(19|20)\d{2}(-\d{2})?\b/g) || [];
+
+  const listings = [];
+  for (const it of body?.itemSummaries || []) {
+    const title = it.title || '';
+    const t = title.toLowerCase();
+    if (exclude.some((w) => t.includes(w))) continue;
+    if (years.some((y) => !t.includes(y.toLowerCase()))) continue;
+    const price = Number(it.price?.value);
+    if (!price || it.price?.currency !== 'USD') continue;
+    const ship = Number(it.shippingOptions?.[0]?.shippingCost?.value || 0);
+    listings.push({
+      title,
+      price: round2(price),
+      shipping: round2(ship),
+      total: round2(price + ship),
+      url: it.itemWebUrl,
+      image: it.image?.imageUrl || it.thumbnailImages?.[0]?.imageUrl || null,
+    });
+  }
+  listings.sort((a, b) => a.total - b.total);
+
+  // Drop suspiciously cheap listings (wrong item, scams), then take the
+  // middle of the 5 cheapest that remain.
+  const mid = median(listings.map((l) => l.total));
+  const sane = mid ? listings.filter((l) => l.total >= mid * 0.6) : [];
+  const estimate = sane.length ? round2(median(sane.slice(0, 5).map((l) => l.total))) : null;
+
+  return { estimate, count: listings.length, used: sane.slice(0, 5), listings: listings.slice(0, 25), url: ebaySearchUrl(q.trim()) };
 }
 
 async function getJson(url, headers = {}) {
@@ -99,6 +208,15 @@ export async function search(source, q, kind) {
 
 // ---------- Quote: every price option for one product ----------
 export async function quote(source, id) {
+  if (source === 'ebay') {
+    const { q, x } = parseEbayId(id);
+    const res = await ebayLookup(q, x);
+    if (res.count < 3 && res.estimate != null) {
+      // Too few listings to trust; still return it so the user can decide.
+      res.lowConfidence = true;
+    }
+    return { prices: [{ key: 'ebay-low', label: 'eBay low Buy It Now', value: res.estimate }], ebay: res };
+  }
   if (source === 'tcgapi') {
     const body = await getJson(`${TCG_BASE}/cards/${encodeURIComponent(id)}/prices`, tcgHeaders());
     return {

@@ -22,7 +22,7 @@ create table if not exists public.cv_holdings (
   purchased_from   text,
   notes            text,
   price_source     text not null default 'manual'
-                   check (price_source in ('tcgapi','sportscardspro','pricecharting','manual')),
+                   check (price_source in ('tcgapi','ebay','sportscardspro','pricecharting','manual')),
   source_id        text,
   price_field      text,
   current_price    numeric(12,2),
@@ -32,6 +32,11 @@ create table if not exists public.cv_holdings (
   created_at       timestamptz not null default now()
 );
 create index if not exists cv_holdings_user_idx on public.cv_holdings(user_id);
+
+-- Keeps the allowed price sources current if you ran an older version of this file
+alter table public.cv_holdings drop constraint if exists cv_holdings_price_source_check;
+alter table public.cv_holdings add constraint cv_holdings_price_source_check
+  check (price_source in ('tcgapi','ebay','sportscardspro','pricecharting','manual'));
 
 -- One price per item per day (builds your charts)
 create table if not exists public.cv_price_history (

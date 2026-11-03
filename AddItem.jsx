@@ -9,14 +9,16 @@ function sourceOptions(category, kind, sources) {
   if (category === 'tcg') {
     if (kind !== 'graded' && sources.tcgapi) opts.push('tcgapi');
     if (sources.pricecharting) opts.push('pricecharting');
-  } else if (sources.sportscardspro) {
-    opts.push('sportscardspro');
+  } else {
+    if (kind === 'sealed' && sources.ebay) opts.push('ebay');
+    if (sources.sportscardspro) opts.push('sportscardspro');
   }
   opts.push('manual');
   return opts;
 }
 
 const SOURCE_HINTS = {
+  ebay: 'Free. Uses the cheapest legit new Buy It Now listings on eBay, checked every night.',
   tcgapi: 'TCGplayer market price (median of recent sales). Raw/ungraded only.',
   sportscardspro: 'Raw and graded values built from recent sales.',
   pricecharting: 'Raw and graded values for Pokémon and other TCGs.',
@@ -30,7 +32,7 @@ const EMPTY_FORM = {
 
 export default function AddItem({ sources, onClose, onSaved }) {
   const [category, setCategory] = useState('sports');
-  const [kind, setKind] = useState('single');
+  const [kind, setKind] = useState('sealed');
   const options = useMemo(() => sourceOptions(category, kind, sources), [category, kind, sources]);
   const [sourcePick, setSourcePick] = useState(null);
   const source = options.includes(sourcePick) ? sourcePick : options[0];
@@ -46,13 +48,44 @@ export default function AddItem({ sources, onClose, onSaved }) {
   const [err, setErr] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const [ebayQ, setEbayQ] = useState('');
+  const [ebayX, setEbayX] = useState('');
+  const [ebayRes, setEbayRes] = useState(null);
+
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const isEbay = source === 'ebay';
 
   function resetPick() {
     setPicked(null);
     setQuote(null);
     setPriceKey('');
     setResults(null);
+    setEbayRes(null);
+  }
+
+  async function checkEbay(e) {
+    e.preventDefault();
+    setErr('');
+    setQuoting(true);
+    setEbayRes(null);
+    try {
+      const id = JSON.stringify({ q: ebayQ.trim(), x: ebayX.trim() });
+      const q = await apiCall(`/api/quote?${new URLSearchParams({ source: 'ebay', id })}`);
+      setEbayRes(q.ebay);
+      setQuote(q);
+      setPriceKey('ebay-low');
+      setPicked({ id, name: ebayQ.trim() });
+      setForm((f) => ({
+        ...f,
+        name: f.name || ebayQ.trim(),
+        image_url: f.image_url || q.ebay.used[0]?.image || '',
+      }));
+    } catch (e2) {
+      setErr(e2.message);
+      setPicked(null);
+    } finally {
+      setQuoting(false);
+    }
   }
 
   async function runSearch(e) {
@@ -147,7 +180,7 @@ export default function AddItem({ sources, onClose, onSaved }) {
     onSaved();
   }
 
-  const noKeys = !sources.tcgapi && !sources.sportscardspro && !sources.pricecharting;
+  const noKeys = !sources.tcgapi && !sources.ebay && !sources.sportscardspro && !sources.pricecharting;
 
   return (
     <Modal title="Add to vault" onClose={onClose} wide>
@@ -157,7 +190,7 @@ export default function AddItem({ sources, onClose, onSaved }) {
             <div className="label">Category</div>
             <div className="seg full">
               {['sports', 'tcg'].map((c) => (
-                <button key={c} className={category === c ? 'active' : ''} onClick={() => { setCategory(c); resetPick(); }}>
+                <button key={c} className={category === c ? 'active' : ''} onClick={() => { setCategory(c); setKind(c === 'sports' ? 'sealed' : 'single'); resetPick(); }}>
                   {c === 'sports' ? 'Sports' : 'TCG'}
                 </button>
               ))}
@@ -192,7 +225,56 @@ export default function AddItem({ sources, onClose, onSaved }) {
           )}
         </div>
 
-        {!isManual && !picked && (
+        {isEbay && (
+          <form className="stack" onSubmit={checkEbay}>
+            <label>
+              eBay search (what you'd type on eBay)
+              <input
+                className="search"
+                autoFocus
+                placeholder="e.g. 2024 Panini Prizm Football Hobby Box"
+                value={ebayQ}
+                onChange={(e) => { setEbayQ(e.target.value); setEbayRes(null); setPicked(null); }}
+              />
+            </label>
+            <label>
+              Leave out listings with these words (optional, separate with commas)
+              <input value={ebayX} onChange={(e) => { setEbayX(e.target.value); setEbayRes(null); setPicked(null); }} placeholder="e.g. blaster, mega, choice" />
+            </label>
+            <p className="muted tiny">Already left out: case, break, spot, pick your team, random, repack, opened, empty, lot of. Listings must match any year you type.</p>
+            <button className="btn primary" disabled={quoting || ebayQ.trim().length < 3}>{quoting ? 'Checking eBay…' : 'Check eBay'}</button>
+          </form>
+        )}
+
+        {isEbay && ebayRes && (
+          <div className="panel inset stack">
+            <div className="panel-head">
+              <div>
+                <div className="label">Estimated market price</div>
+                <div className="hero-value mono" style={{ fontSize: '1.8rem' }}>{ebayRes.estimate != null ? money(ebayRes.estimate) : 'No match'}</div>
+                <div className="muted small">From {ebayRes.count} matching listing{ebayRes.count === 1 ? '' : 's'} (price + shipping)</div>
+              </div>
+              <a className="btn ghost small" href={ebayRes.url} target="_blank" rel="noreferrer">Open on eBay</a>
+            </div>
+            {ebayRes.count > 0 && ebayRes.count < 3 && <div className="note">Only a few listings match, so this estimate is shaky. Try a broader search.</div>}
+            {ebayRes.used.length > 0 && (
+              <>
+                <div className="label">Listings used for the estimate — make sure these are the right box</div>
+                <ul className="listing-list">
+                  {ebayRes.used.map((l) => (
+                    <li key={l.url}>
+                      <a href={l.url} target="_blank" rel="noreferrer">{l.title}</a>
+                      <span className="mono small">{money(l.total)}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="muted tiny">Wrong products showing up? Make the search more specific, or add words to leave out, then check again.</p>
+              </>
+            )}
+          </div>
+        )}
+
+        {!isManual && !isEbay && !picked && (
           <form className="search-form" onSubmit={runSearch}>
             <input
               className="search"
@@ -207,7 +289,7 @@ export default function AddItem({ sources, onClose, onSaved }) {
 
         {err && <div className="alert">{err}</div>}
 
-        {!isManual && !picked && results && (
+        {!isManual && !isEbay && !picked && results && (
           results.length === 0 ? (
             <p className="muted small">No matches. Try fewer words, or the player/card name plus the year or set.</p>
           ) : (
@@ -228,7 +310,7 @@ export default function AddItem({ sources, onClose, onSaved }) {
           )
         )}
 
-        {!isManual && picked && (
+        {!isManual && !isEbay && picked && (
           <div className="picked panel inset">
             <div className="panel-head">
               <div>
