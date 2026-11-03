@@ -1,0 +1,8 @@
+{
+  "crons": [
+    { "path": "/api/refresh-prices", "schedule": "0 11 * * *" }
+  ],
+  "functions": {
+    "api/refresh-prices.js": { "maxDuration": 60 }
+  }
+}
