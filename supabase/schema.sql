@@ -98,6 +98,7 @@ create or replace function public.cv_record_sale(
 ) returns uuid
 language plpgsql
 security invoker
+set search_path = public
 as $$
 declare
   h      public.cv_holdings;
